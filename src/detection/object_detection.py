@@ -38,8 +38,8 @@ class ObjectDetector:
     def _initialize_model(self):
         """Initialize optimized YOLO model"""
         try:
-            # Use YOLOv8n model
-            self.model = YOLO('models/yolov8n.pt')
+            # Use YOLOv8s model for better accuracy than nano to prevent false positives
+            self.model = YOLO('models/yolov8s.pt')
             
             # Optimize model settings
             self.model.overrides['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -71,8 +71,9 @@ class ObjectDetector:
             new_h = int(orig_h * (new_w / orig_w))
             resized_frame = cv2.resize(frame, (new_w, new_h))
             
-            # Run inference with lower confidence to catch small objects
-            results = self.model(resized_frame, verbose=False, conf=0.35)
+            min_conf = self.config.get('min_confidence', 0.65)
+            # Run inference with confidence from config to filter false positives
+            results = self.model(resized_frame, verbose=False, conf=min_conf)
             
             detected = False
             person_detected = False
@@ -88,9 +89,33 @@ class ObjectDetector:
                         person_detected = True
 
                     # Forbidden object detection
-                    if cls in self.forbidden_classes and conf > 0.35:
+                    if cls in self.forbidden_classes and conf > min_conf:
+                        
+                        # Apply custom labeling logic for cell phones (cls=67) to handle false positives
+                        if cls == 67:
+                            x1_tmp, y1_tmp, x2_tmp, y2_tmp = box.xyxy[0]
+                            box_w = float(x2_tmp - x1_tmp)
+                            box_h = float(y2_tmp - y1_tmp)
+                            
+                            if box_w > 0 and box_h > 0:
+                                aspect_ratio = max(box_w, box_h) / min(box_w, box_h)
+                                area_ratio = (box_w * box_h) / (new_w * new_h)
+                                
+                                # Reject extremely tall/thin objects (like perfume bottles aspect ratio > 2.8)
+                                # Reject impossibly tiny (<0.5%) or monstrously large (>60%) detections
+                                if aspect_ratio > 2.8 or area_ratio < 0.005 or area_ratio > 0.60:
+                                    continue
+                                    
+                            # Since realistic webcams max out at ~88% confidence for real phones,
+                            # 80% is a safe and highly accurate threshold now that geometric shapes filter out bottles.
+                            if conf > 0.80:
+                                label = "cell phone"
+                            else:
+                                label = "unidentified object"
+                        else:
+                            label = self.class_map.get(cls, f"object_{cls}")
+                            
                         detected = True
-                        label = self.class_map.get(cls, f"object_{cls}")
                         detected_labels.append(label)
                         
                         # Always draw bounding boxes on forbidden objects

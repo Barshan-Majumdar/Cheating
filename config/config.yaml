@@ -24,7 +24,7 @@ detection:
   multi_face:
     alert_threshold: 5        # frames
   objects:
-    min_confidence: 0.35  # Lowered for small object detection
+    min_confidence: 0.60  # Increased to prevent false positive phone detections
     detection_interval: 3 # frames between detections
     max_fps: 10           # Faster detection cycle
   audio_monitoring:

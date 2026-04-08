@@ -54,17 +54,11 @@ class FaceDetector:
             self.face_disappeared_start = None
             return True
         else:
-            if fallback_person_present:
-                self.face_present = True
-                self.last_face_time = current_time
-                self.face_disappeared_start = None
-                return True
-
-            if self.face_present:
+            if self.face_present or self.face_disappeared_start is None:
                 self.face_disappeared_start = current_time
                 
             self.face_present = False
-            if self.last_face_time and (current_time - self.last_face_time).total_seconds() > 5:
+            if self.face_disappeared_start and (current_time - self.face_disappeared_start).total_seconds() > 5:
                 if self.alert_logger:
                     self.alert_logger.log_alert(
                         "FACE_DISAPPEARED",

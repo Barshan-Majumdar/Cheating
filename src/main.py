@@ -42,12 +42,20 @@ def display_detection_results(frame, results):
         
     # Massive Cheating Pop-ups
     popups = []
+    if not results.get('face_present', True):
+        popups.append("ALERT: FACE NOT DETECTED")
     if results.get('eye_alarming'):
         popups.append("SUSPICIOUS: EXCESSIVE EYE MOVEMENT")
     if results.get('mouth_alarming'):
         popups.append("CHEATING: WHISPERING / TALKING")
     if results.get('objects_detected') and results.get('detected_object_label'):
-        popups.append(f"UNAUTHORIZED OBJECT: {results['detected_object_label'].upper()}")
+        labels = results['detected_object_label'].upper()
+        if labels == "CELL PHONE":
+            popups.append("UNAUTHORIZED CELL PHONE DETECTED")
+        elif labels == "UNIDENTIFIED OBJECT":
+            popups.append("UNAUTHORIZED OBJECT DETECTED")
+        else:
+            popups.append(f"UNAUTHORIZED OBJECT DETECTED: {labels}")
     if results.get('hand_violation') and results.get('hand_violation_msg'):
         popups.append(results['hand_violation_msg'].upper())
         
@@ -80,8 +88,20 @@ def display_detection_results(frame, results):
                (frame.shape[1] - 250, 30), 
                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
+import time
+last_violation_times = {}
+
 def handle_violation(violation_type, frame, results, alert_system, violation_capturer, violation_logger, custom_message=None):
     """Unified handler for all violation types"""
+    current_time = time.time()
+    cooldown = alert_system.config.get('logging', {}).get('alert_cooldown', 5)
+    last_time = last_violation_times.get(violation_type, 0)
+    
+    if current_time - last_time < cooldown:
+        return
+        
+    last_violation_times[violation_type] = current_time
+
     alert_system.speak_alert(violation_type, custom_message=custom_message)
     
     # Capture and log violation
@@ -232,7 +252,14 @@ def main():
             elif results.get('multiple_faces'):
                 handle_violation("MULTIPLE_FACES", frame, results, alert_system, violation_capturer, violation_logger)
             elif results.get('objects_detected'):
-                handle_violation("OBJECT_DETECTED", frame, results, alert_system, violation_capturer, violation_logger, custom_message=f"Unauthorized object {results.get('detected_object_label', '')} detected")
+                labels = results.get('detected_object_label', '')
+                if labels == "cell phone":
+                    msg = "Unauthorized cell phone detected."
+                elif labels == "unidentified object":
+                    msg = "Unauthorized object detected."
+                else:
+                    msg = f"Unauthorized object detected: {labels}."
+                handle_violation("OBJECT_DETECTED", frame, results, alert_system, violation_capturer, violation_logger, custom_message=msg)
             elif results.get('mouth_moving'):
                 handle_violation("MOUTH_MOVING", frame, results, alert_system, violation_capturer, violation_logger)
             elif results.get('hand_violation'):

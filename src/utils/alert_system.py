@@ -33,7 +33,8 @@ class AlertSystem:
         
     def speak_alert(self, alert_type, custom_message=None):
         """Convert text to speech and play it"""
-        if not self._can_alert(alert_type):
+        voice_enabled = self.config.get('logging', {}).get('alert_system', {}).get('voice_alerts', True)
+        if not voice_enabled or not self._can_alert(alert_type):
             return
             
         self.last_alert_time[alert_type] = time.time()
