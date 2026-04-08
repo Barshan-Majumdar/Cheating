@@ -19,9 +19,10 @@ class AlertSystem:
             "MULTIPLE_FACES": "We detected multiple people",
             "OBJECT_DETECTED": "Unauthorized object detected",
             "GAZE_AWAY": "Please focus on your screen",
-            "MOUTH_MOVING": "Please maintain silence during exam",
-            "SPEECH_VIOLATION": "Speaking during exam is not allowed",
-            "VOICE_DETECTED": "We detected voice, Please maintain silence during the exam",
+            "MOUTH_MOVING": "Cheating detected. Whispering or talking is not allowed.",
+            "SPEECH_VIOLATION": "Cheating detected. Speaking during the exam is not allowed.",
+            "VOICE_DETECTED": "Cheating detected. Voice activity discovered. Please remain silent.",
+            "HAND_VIOLATION": "Suspicious hand movements detected",
         }
         
     def _can_alert(self, alert_type):
@@ -30,7 +31,7 @@ class AlertSystem:
         last_time = self.last_alert_time.get(alert_type, 0)
         return (current_time - last_time) >= self.alert_cooldown
         
-    def speak_alert(self, alert_type):
+    def speak_alert(self, alert_type, custom_message=None):
         """Convert text to speech and play it"""
         if not self._can_alert(alert_type):
             return
@@ -39,9 +40,11 @@ class AlertSystem:
         
         def _play_audio():
             try:
-                if alert_type in self.alerts:
+                # Dynamic audio synthesis
+                message = custom_message if custom_message else self.alerts.get(alert_type)
+                if message:
                     # Generate speech
-                    tts = gTTS(text=self.alerts[alert_type], lang='en')
+                    tts = gTTS(text=message, lang='en')
                     
                     # Save temporary audio file
                     with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as fp:

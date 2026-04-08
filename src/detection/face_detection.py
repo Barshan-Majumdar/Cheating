@@ -21,20 +21,26 @@ class FaceDetector:
         self.last_face_time = None
         self.alert_logger = None
         self.face_disappeared_start = None
+        self.last_landmarks = None
 
     def set_alert_logger(self, alert_logger):
         self.alert_logger = alert_logger
 
-    def detect_face(self, frame):
+    def detect_face(self, frame, fallback_person_present=False):
         self.frame_count += 1
         if self.frame_count % self.detection_interval != 0:
             return self.face_present
+
             
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        boxes, probs = self.detector.detect(rgb_frame)
+        
+        # Prevent PyTorch from building massive computational graphs and OOM crashing
+        with torch.no_grad():
+            boxes, probs, points = self.detector.detect(rgb_frame, landmarks=True)
         
         current_time = datetime.now()
         if boxes is not None and len(boxes) > 0 and probs[0] > self.min_confidence:
+            self.last_landmarks = points[0] if points is not None else None
             if not self.face_present and self.face_disappeared_start:
                 disappearance_duration = (current_time - self.face_disappeared_start).total_seconds()
                 if disappearance_duration > 5 and self.alert_logger:
@@ -48,6 +54,12 @@ class FaceDetector:
             self.face_disappeared_start = None
             return True
         else:
+            if fallback_person_present:
+                self.face_present = True
+                self.last_face_time = current_time
+                self.face_disappeared_start = None
+                return True
+
             if self.face_present:
                 self.face_disappeared_start = current_time
                 
@@ -59,3 +71,8 @@ class FaceDetector:
                         "Face disappeared for more than 5 seconds"
                     )
             return False
+
+    def is_violation(self):
+        if not self.face_present and self.face_disappeared_start:
+            return (datetime.now() - self.face_disappeared_start).total_seconds() > 5
+        return False

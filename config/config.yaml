@@ -20,24 +20,24 @@ detection:
     gaze_sensitivity: 15       # pixels threshold for gaze detection
     consecutive_frames: 3      # frames for gaze change detection
   mouth:
-    movement_threshold: 3     # consecutive frames
+    movement_threshold: 8     # consecutive frames (raised to prevent false positives)
   multi_face:
     alert_threshold: 5        # frames
   objects:
-    min_confidence: 0.65  # Detection confidence threshold
-    detection_interval: 5 # frames between detections
-    max_fps: 5            # Maximum detection frames per second
+    min_confidence: 0.35  # Lowered for small object detection
+    detection_interval: 3 # frames between detections
+    max_fps: 10           # Faster detection cycle
   audio_monitoring:
     enabled: true
     sample_rate: 16000
-    energy_threshold: 0.001
+    energy_threshold: 0.03
     zcr_threshold: 0.35
     whisper_enabled: false  # Enable only when needed
     whisper_model: "tiny.en"
         
 logging:
   log_path: "./logs"
-  alert_cooldown: 10          # seconds
+  alert_cooldown: 5          # seconds (reduced for faster response)
   alert_system:
     voice_alerts: true  # Enable/disable voice alerts
     alert_volume: 0.8   # Volume level (0.0 to 1.0)
@@ -60,4 +60,5 @@ reporting:
     MOUTH_MOVING: 3
     MULTIPLE_FACES: 4
     OBJECT_DETECTED: 5
+    HAND_VIOLATION: 5
     AUDIO_DETECTED: 3

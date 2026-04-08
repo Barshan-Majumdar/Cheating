@@ -21,7 +21,10 @@ class MultiFaceDetector:
 
     def detect_multiple_faces(self, frame):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        boxes, probs = self.detector.detect(rgb_frame)
+        
+        # Prevent PyTorch from building massive computational graphs and OOM crashing
+        with torch.no_grad():
+            boxes, probs = self.detector.detect(rgb_frame)
         
         if boxes is not None and len(boxes) > 1:
             # Count faces with high confidence

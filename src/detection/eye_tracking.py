@@ -11,9 +11,8 @@ class EyeTracker:
         self.face_mesh = None
         
         try:
-            # Standard MediaPipe solutions import (Stable on Python 3.12 + MediaPipe 0.10.14)
-            import mediapipe.solutions.face_mesh as mp_face_mesh
-            self.mp_face_mesh = mp_face_mesh
+            # Setup MediaPipe face mesh cleanly
+            self.mp_face_mesh = mp.solutions.face_mesh
             
             if self.mp_face_mesh:
                 self.face_mesh = self.mp_face_mesh.FaceMesh(
@@ -22,10 +21,11 @@ class EyeTracker:
                     min_detection_confidence=0.5,
                     min_tracking_confidence=0.5)
                 self.enabled = True
-                print("Eye Tracker initialized successfully.")
         except Exception as e:
-            print(f"Warning: Eye Tracker could not be initialized (MediaPipe Error: {e}).")
+            # Silently use MTCNN fallback for large scale
             self.enabled = False
+        
+        self.eye_alarm_end_time = datetime.now()
         
         self.config = config
         self.eye_threshold = config['detection']['eyes']['gaze_threshold']
@@ -60,8 +60,55 @@ class EyeTracker:
         ear = (A + B) / (2.0 * C)
         return ear
 
-    def track_eyes(self, frame):
+    def track_eyes(self, frame, fallback_landmarks=None):
         if not self.enabled:
+            # Fallback logic using MTCNN landmarks
+            if fallback_landmarks is not None and len(fallback_landmarks) == 5:
+                le, re, nose = fallback_landmarks[0], fallback_landmarks[1], fallback_landmarks[2]
+                
+                # Use euclidean distances for safety
+                dist_left = np.linalg.norm(nose - le)
+                dist_right = np.linalg.norm(nose - re)
+                
+                raw_ratio = (dist_left - dist_right) / (dist_left + dist_right + 1e-6)
+                
+                # EMA to smooth out MTCNN points jitter
+                if not hasattr(self, 'smoothed_ratio'):
+                    self.smoothed_ratio = raw_ratio
+                    self.gaze_hold_frames = 0
+                    self.last_stable_gaze = "center"
+                else:
+                    self.smoothed_ratio = 0.8 * self.smoothed_ratio + 0.2 * raw_ratio
+                
+                new_gaze = "center"
+                if self.smoothed_ratio < -0.15:
+                    new_gaze = "left"
+                elif self.smoothed_ratio > 0.15:
+                    new_gaze = "right"
+                    
+                # Require gaze to stabilize for a few frames
+                if new_gaze != self.last_stable_gaze:
+                    self.gaze_hold_frames += 1
+                    if self.gaze_hold_frames >= 3:
+                        self.last_stable_gaze = new_gaze
+                        self.gaze_hold_frames = 0
+                        
+                        current_time = datetime.now()
+                        if new_gaze != self.gaze_direction:
+                            self.gaze_changes += 1
+                            self.gaze_direction = new_gaze
+                            self.last_gaze_change = current_time
+                            
+                        # Manage gaze change timer
+                        if (self.gaze_changes > 3 and 
+                            (current_time - self.last_gaze_change).total_seconds() < 2 and
+                            self.alert_logger):
+                            self.alert_logger.log_alert("EYE_MOVEMENT", "Excessive head/eye movement detected (Fallback module)")
+                            self.eye_alarm_end_time = datetime.now() + __import__('datetime').timedelta(seconds=2)
+                            self.gaze_changes = 0
+                else:
+                    self.gaze_hold_frames = 0
+            
             return self.gaze_direction, self.eye_ratio
             
         try:
@@ -123,6 +170,7 @@ class EyeTracker:
                     "EYE_MOVEMENT",
                     "Excessive eye movement detected"
                 )
+                self.eye_alarm_end_time = datetime.now() + __import__('datetime').timedelta(seconds=2)
                 self.gaze_changes = 0
             
             return self.gaze_direction, self.eye_ratio
@@ -134,3 +182,6 @@ class EyeTracker:
                     f"Error in eye tracking: {str(e)}"
                 )
             return self.gaze_direction, self.eye_ratio  # Return last known values
+
+    def is_alarming(self):
+        return datetime.now() < self.eye_alarm_end_time
