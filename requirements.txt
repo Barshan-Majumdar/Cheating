@@ -36,5 +36,6 @@ flask>=2.0.0
 
 # Platform-Specific Dependencies
 pywin32>=300; sys_platform == 'win32'
+pygrabber>=0.2; sys_platform == 'win32'
 dbus-python>=1.3.2; sys_platform == 'linux'
 pygobject>=3.42.2; sys_platform == 'linux'

@@ -1,38 +1,53 @@
 import cv2
 import torch
 from ultralytics import YOLO
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class ObjectDetector:
     def __init__(self, config):
         self.config = config['detection']['objects']
         self.model = None
+        # Expanded suspicious object map from COCO dataset
         self.class_map = {
+            0:  'person',       # Extra person in frame
+            24: 'backpack',
+            25: 'umbrella',
+            26: 'handbag',
+            39: 'bottle',
+            63: 'laptop',
+            65: 'remote',
+            66: 'keyboard',
+            67: 'cell phone',
             73: 'book',
-            67: 'cell phone'
+            74: 'clock',
+            76: 'scissors',
         }
+        # These are the ones we actually flag as cheating (not person)
+        self.forbidden_classes = {24, 25, 26, 63, 65, 66, 67, 73, 74, 76}
+        
         self.alert_logger = None
+        self.object_alarm_end_time = datetime.now()
+        self.last_detected_label = ""
         self.detection_interval = self.config['detection_interval']
         self.frame_count = 0
+        self.last_detected = False
+        self.last_person_detected = False
         self._initialize_model()
         self.last_detection_time = datetime.now()
 
     def _initialize_model(self):
         """Initialize optimized YOLO model"""
         try:
-            # Use the smallest YOLOv8 model for speed
+            # Use YOLOv8n model
             self.model = YOLO('models/yolov8n.pt')
             
             # Optimize model settings
-            self.model.overrides['conf'] = self.config['min_confidence']
             self.model.overrides['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
-            self.model.overrides['imgsz'] = 320  # Smaller input size for faster processing
-            # self.model.overrides['half'] = True  # Use FP16 precision if GPU available
-            self.model.overrides['iou'] = 0.45   # Slightly higher IOU threshold
-
+            self.model.overrides['imgsz'] = 480  # Bigger for better small-object detection
+            self.model.overrides['iou'] = 0.45
             
             # Warm up the model
-            dummy_input = torch.zeros((1, 3, 320, 320)).to(self.model.device)
+            dummy_input = torch.zeros((1, 3, 480, 480)).to(self.model.device)
             self.model(dummy_input)
             
         except Exception as e:
@@ -41,55 +56,72 @@ class ObjectDetector:
     def set_alert_logger(self, alert_logger):
         self.alert_logger = alert_logger
 
-    def detect_objects(self, frame, visualize=False):
-        """Optimized object detection with frame skipping"""
+    def detect_objects(self, frame):
+        """Object detection with bounding box visualization always on"""
         current_time = datetime.now()
         time_since_last = (current_time - self.last_detection_time).total_seconds()
         
         # Skip detection if not enough time has passed
         if time_since_last < (1.0 / self.config['max_fps']):
-            return False
+            return self.last_detected, self.last_person_detected
             
         try:
-            # Resize frame for faster processing (maintaining aspect ratio)
             orig_h, orig_w = frame.shape[:2]
-            new_w = 320
+            new_w = 480
             new_h = int(orig_h * (new_w / orig_w))
             resized_frame = cv2.resize(frame, (new_w, new_h))
             
-            # Run inference
-            results = self.model(resized_frame, verbose=False)  # Disable logging
+            # Run inference with lower confidence to catch small objects
+            results = self.model(resized_frame, verbose=False, conf=0.35)
             
             detected = False
+            person_detected = False
+            detected_labels = []
+            
             for result in results:
                 for box in result.boxes:
                     cls = int(box.cls)
                     conf = float(box.conf)
                     
-                    if cls in self.class_map and conf > self.config['min_confidence']:
+                    # Person tracking for occlusion fallback
+                    if cls == 0 and conf > 0.5:
+                        person_detected = True
+
+                    # Forbidden object detection
+                    if cls in self.forbidden_classes and conf > 0.35:
                         detected = True
-                        label = self.class_map[cls]
+                        label = self.class_map.get(cls, f"object_{cls}")
+                        detected_labels.append(label)
                         
-                        if self.alert_logger:
-                            self.alert_logger.log_alert(
-                                "FORBIDDEN_OBJECT",
-                                f"Detected {label} with confidence {conf:.2f}"
-                            )
+                        # Always draw bounding boxes on forbidden objects
+                        x1, y1, x2, y2 = box.xyxy[0]
+                        x1 = int(x1 * (orig_w / new_w))
+                        y1 = int(y1 * (orig_h / new_h))
+                        x2 = int(x2 * (orig_w / new_w))
+                        y2 = int(y2 * (orig_h / new_h))
                         
-                        if visualize:
-                            # Scale coordinates back to original frame size
-                            x1, y1, x2, y2 = box.xyxy[0]
-                            x1 = int(x1 * (orig_w / new_w))
-                            y1 = int(y1 * (orig_h / new_h))
-                            x2 = int(x2 * (orig_w / new_w))
-                            y2 = int(y2 * (orig_h / new_h))
-                            
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1-10),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                        # Red bounding box with label
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                        text = f"ALERT: {label.upper()} ({conf:.0%})"
+                        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                        cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), (0, 0, 255), -1)
+                        cv2.putText(frame, text, (x1, y1 - 5),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            if detected and detected_labels:
+                combined_label = ", ".join(set(detected_labels))
+                if self.alert_logger:
+                    self.alert_logger.log_alert(
+                        "OBJECT_DETECTED",
+                        f"Unauthorized object detected: {combined_label}"
+                    )
+                self.object_alarm_end_time = datetime.now() + timedelta(seconds=3)
+                self.last_detected_label = combined_label
             
             self.last_detection_time = current_time
-            return detected
+            self.last_detected = detected
+            self.last_person_detected = person_detected
+            return detected, person_detected
             
         except Exception as e:
             if self.alert_logger:
@@ -97,4 +129,7 @@ class ObjectDetector:
                     "OBJECT_DETECTION_ERROR",
                     f"Object detection failed: {str(e)}"
                 )
-            return False
+            return self.last_detected, self.last_person_detected
+
+    def is_alarming(self):
+        return datetime.now() < self.object_alarm_end_time, self.last_detected_label

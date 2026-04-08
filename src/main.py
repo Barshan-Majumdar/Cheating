@@ -39,6 +39,29 @@ def display_detection_results(frame, results):
         alert_items.append("Multiple Faces Detected!")
     if results['objects_detected']:
         alert_items.append("Suspicious Object Detected!")
+        
+    # Massive Cheating Pop-ups
+    popups = []
+    if results.get('eye_alarming'):
+        popups.append("SUSPICIOUS: EXCESSIVE EYE MOVEMENT")
+    if results.get('mouth_alarming'):
+        popups.append("CHEATING: WHISPERING / TALKING")
+    if results.get('objects_detected') and results.get('detected_object_label'):
+        popups.append(f"UNAUTHORIZED OBJECT: {results['detected_object_label'].upper()}")
+    if results.get('hand_violation') and results.get('hand_violation_msg'):
+        popups.append(results['hand_violation_msg'].upper())
+        
+    if popups:
+        # Draw a semi-transparent red box across the top
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (frame.shape[1], len(popups)*45 + 20), (0, 0, 200), -1)
+        cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame)
+        
+        y_pop = 40
+        for text in popups:
+            cv2.putText(frame, text, (frame.shape[1]//2 - 300, y_pop), 
+                       cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), 2)
+            y_pop += 40
 
     # Display status
     for item in status_items:
@@ -57,9 +80,9 @@ def display_detection_results(frame, results):
                (frame.shape[1] - 250, 30), 
                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-def handle_violation(violation_type, frame, results, alert_system, violation_capturer, violation_logger):
+def handle_violation(violation_type, frame, results, alert_system, violation_capturer, violation_logger, custom_message=None):
     """Unified handler for all violation types"""
-    alert_system.speak_alert(violation_type)
+    alert_system.speak_alert(violation_type, custom_message=custom_message)
     
     # Capture and log violation
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -130,13 +153,20 @@ def main():
 
         # Initialize detectors safely
         detector_classes = [
+            ObjectDetector,
             FaceDetector,
             EyeTracker,
             MouthMonitor,
-            MultiFaceDetector,
-            ObjectDetector
+            MultiFaceDetector
         ]
         
+        # Add HandMonitor if available
+        try:
+            from src.detection.hand_detection import HandMonitor
+            detector_classes.append(HandMonitor)
+        except ImportError:
+            pass
+            
         detectors = []
         for cls in detector_classes:
             try:
@@ -168,28 +198,45 @@ def main():
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
+            person_present = False
             # Perform detections safely
             for det in detectors:
-                if isinstance(det, FaceDetector):
-                    results['face_present'] = det.detect_face(frame)
+                if isinstance(det, ObjectDetector):
+                    results['objects_detected'], person_present = det.detect_objects(frame)
+                    _, results['detected_object_label'] = det.is_alarming()
+                elif isinstance(det, FaceDetector):
+                    results['face_present'] = det.detect_face(frame, fallback_person_present=person_present)
                 elif isinstance(det, EyeTracker):
-                    results['gaze_direction'], results['eye_ratio'] = det.track_eyes(frame)
+                    face_detector_instance = next((d for d in detectors if isinstance(d, FaceDetector)), None)
+                    lms = face_detector_instance.last_landmarks if face_detector_instance else None
+                    results['gaze_direction'], results['eye_ratio'] = det.track_eyes(frame, fallback_landmarks=lms)
+                    results['eye_alarming'] = det.is_alarming()
                 elif isinstance(det, MouthMonitor):
-                    results['mouth_moving'] = det.monitor_mouth(frame)
+                    face_detector_instance = next((d for d in detectors if isinstance(d, FaceDetector)), None)
+                    lms = face_detector_instance.last_landmarks if face_detector_instance else None
+                    results['mouth_moving'] = det.monitor_mouth(frame, fallback_landmarks=lms)
+                    results['mouth_alarming'] = det.is_alarming()
                 elif isinstance(det, MultiFaceDetector):
                     results['multiple_faces'] = det.detect_multiple_faces(frame)
-                elif isinstance(det, ObjectDetector):
-                    results['objects_detected'] = det.detect_objects(frame)
+                elif type(det).__name__ == "HandMonitor":
+                    hand_alert_triggered, hand_alert_msg = det.monitor_hands(frame)
+                    if hand_alert_triggered:
+                        results['hand_violation'] = True
+                        results['hand_violation_msg'] = hand_alert_msg
 
             # Violation Checks
-            if not results['face_present']:
+            face_detector_instance = next((d for d in detectors if isinstance(d, FaceDetector)), None)
+            
+            if face_detector_instance and face_detector_instance.is_violation():
                 handle_violation("FACE_DISAPPEARED", frame, results, alert_system, violation_capturer, violation_logger)
-            elif results['multiple_faces']:
+            elif results.get('multiple_faces'):
                 handle_violation("MULTIPLE_FACES", frame, results, alert_system, violation_capturer, violation_logger)
-            elif results['objects_detected']:
-                handle_violation("OBJECT_DETECTED", frame, results, alert_system, violation_capturer, violation_logger)
-            elif results['mouth_moving']:
+            elif results.get('objects_detected'):
+                handle_violation("OBJECT_DETECTED", frame, results, alert_system, violation_capturer, violation_logger, custom_message=f"Unauthorized object {results.get('detected_object_label', '')} detected")
+            elif results.get('mouth_moving'):
                 handle_violation("MOUTH_MOVING", frame, results, alert_system, violation_capturer, violation_logger)
+            elif results.get('hand_violation'):
+                handle_violation("HAND_VIOLATION", frame, results, alert_system, violation_capturer, violation_logger, custom_message=results.get('hand_violation_msg'))
 
             # Display and record
             display_detection_results(frame, results)
