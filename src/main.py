@@ -14,6 +14,7 @@ from utils.alert_system import AlertSystem
 from utils.violation_logger import ViolationLogger
 from utils.screenshot_utils import ViolationCapturer
 from reporting.report_generator import ReportGenerator
+from utils.hardware_checks import HardwareMonitor
 
 
 def load_config():
@@ -89,6 +90,11 @@ def main():
     video_recorder = VideoRecorder(config)
     screen_recorder = ScreenRecorder(config)
     
+    # Initialize hardware monitor
+    hardware_monitor = HardwareMonitor(config)
+    hardware_monitor.set_alert_logger(alert_logger)
+    hardware_monitor.start()
+
     # Initialize audio monitor
     audio_monitor = AudioMonitor(config)
     audio_monitor.alert_system = alert_system
@@ -200,6 +206,10 @@ def main():
         print("Cleaning up resources...")
         
         # Stop everything
+        try:
+            hardware_monitor.stop()
+        except: pass
+        
         if audio_started:
             audio_monitor.stop()
             
