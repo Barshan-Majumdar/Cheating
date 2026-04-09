@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import datetime
 
 class MouthMonitor:
     def __init__(self, config):
@@ -11,7 +12,7 @@ class MouthMonitor:
             # Silently use MTCNN fallback for large scale
             self.mp_face_mesh = None
             
-        self.mouth_alarm_end_time = __import__('datetime').datetime.now()
+        self.mouth_alarm_end_time = datetime.datetime.now()
             
         if self.mp_face_mesh:
             self.face_mesh = self.mp_face_mesh.FaceMesh(
@@ -58,7 +59,7 @@ class MouthMonitor:
                     self.mouth_movement_count += 1
                     if self.mouth_movement_count > self.mouth_threshold and self.alert_logger:
                         self.alert_logger.log_alert("MOUTH_MOVEMENT", "Excessive mouth movement detected (Fallback module)")
-                        self.mouth_alarm_end_time = __import__('datetime').datetime.now() + __import__('datetime').timedelta(seconds=2)
+                        self.mouth_alarm_end_time = datetime.datetime.now() + datetime.timedelta(seconds=2)
                         self.mouth_movement_count = 0
                     return True
                 else:
@@ -101,7 +102,7 @@ class MouthMonitor:
                     "MOUTH_MOVEMENT", 
                     "Excessive mouth movement detected (possible talking)"
                 )
-                self.mouth_alarm_end_time = __import__('datetime').datetime.now() + __import__('datetime').timedelta(seconds=2)
+                self.mouth_alarm_end_time = datetime.datetime.now() + datetime.timedelta(seconds=2)
                 self.mouth_movement_count = 0
             return True
         else:
@@ -109,4 +110,4 @@ class MouthMonitor:
             return False
 
     def is_alarming(self):
-        return __import__('datetime').datetime.now() < self.mouth_alarm_end_time
+        return datetime.datetime.now() < self.mouth_alarm_end_time

@@ -41,6 +41,8 @@ class AlertSystem:
         
         def _play_audio():
             try:
+                if not pygame.mixer.get_init():
+                    return
                 # Dynamic audio synthesis
                 message = custom_message if custom_message else self.alerts.get(alert_type)
                 if message:

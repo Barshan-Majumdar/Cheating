@@ -182,7 +182,7 @@ def main():
         
         # Add HandMonitor if available
         try:
-            from src.detection.hand_detection import HandMonitor
+            from detection.hand_detection import HandMonitor
             detector_classes.append(HandMonitor)
         except ImportError:
             pass
@@ -274,6 +274,8 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
                 
+    except KeyboardInterrupt:
+        print("\nSession stopped by user (Ctrl+C).")
     except Exception as e:
         print(f"An unexpected error occurred during execution: {e}")
     finally:
