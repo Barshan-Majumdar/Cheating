@@ -1,0 +1,14 @@
+# Render Blueprint — declares how to deploy this project.
+# Push this file to GitHub and Render will auto-detect it.
+# Docs: https://docs.render.com/blueprint-spec
+
+services:
+  - type: web
+    name: ai-proctoring-dashboard
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.dashboard.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+    plan: free
