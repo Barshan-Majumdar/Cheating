@@ -23,6 +23,15 @@ class FaceDetector:
         self.face_disappeared_start = None
         self.last_landmarks = None
 
+        # ── Real Model Metrics ─────────────────────────────────────────
+        self.metrics = {
+            'inference_frames': 0,
+            'face_detected_frames': 0,
+            'face_absent_frames': 0,
+            'violation_frames': 0,   # sustained absence > 5s
+            'confidences': [],       # MTCNN confidence per detection
+        }
+
     def set_alert_logger(self, alert_logger):
         self.alert_logger = alert_logger
 
@@ -39,7 +48,10 @@ class FaceDetector:
             boxes, probs, points = self.detector.detect(rgb_frame, landmarks=True)
         
         current_time = datetime.now()
+        self.metrics['inference_frames'] += 1
         if boxes is not None and len(boxes) > 0 and probs[0] > self.min_confidence:
+            self.metrics['face_detected_frames'] += 1
+            self.metrics['confidences'].append(float(probs[0]))
             self.last_landmarks = points[0] if points is not None else None
             if not self.face_present and self.face_disappeared_start:
                 disappearance_duration = (current_time - self.face_disappeared_start).total_seconds()
@@ -58,7 +70,9 @@ class FaceDetector:
                 self.face_disappeared_start = current_time
                 
             self.face_present = False
+            self.metrics['face_absent_frames'] += 1
             if self.face_disappeared_start and (current_time - self.face_disappeared_start).total_seconds() > 5:
+                self.metrics['violation_frames'] += 1
                 if self.alert_logger:
                     self.alert_logger.log_alert(
                         "FACE_DISAPPEARED",

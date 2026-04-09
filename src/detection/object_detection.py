@@ -35,6 +35,16 @@ class ObjectDetector:
         self._initialize_model()
         self.last_detection_time = datetime.now()
 
+        # ── Real Model Metrics Counters ────────────────────────────────
+        self.metrics = {
+            'inference_frames': 0,       # Total frames where YOLO ran
+            'raw_detections': 0,         # All YOLO outputs above conf threshold
+            'validated_detections': 0,   # Passed geometric filters (model TP)
+            'rejected_detections': 0,    # Failed geometric filters (model FP)
+            'no_detection_frames': 0,    # Frames with zero forbidden objects
+            'confidences': [],           # Confidence of every validated detection
+        }
+
     def _initialize_model(self):
         """Initialize optimized YOLO model"""
         try:
@@ -78,6 +88,9 @@ class ObjectDetector:
             detected = False
             person_detected = False
             detected_labels = []
+            frame_raw = 0       # raw YOLO forbidden-object detections this frame
+            frame_validated = 0 # detections that pass all filters this frame
+            frame_rejected = 0  # detections rejected by geometric filters
             
             for result in results:
                 for box in result.boxes:
@@ -90,6 +103,7 @@ class ObjectDetector:
 
                     # Forbidden object detection
                     if cls in self.forbidden_classes and conf > min_conf:
+                        frame_raw += 1
                         
                         # Apply custom labeling logic for cell phones (cls=67) to handle false positives
                         if cls == 67:
@@ -104,6 +118,7 @@ class ObjectDetector:
                                 # Reject extremely tall/thin objects (like perfume bottles aspect ratio > 2.8)
                                 # Reject impossibly tiny (<0.5%) or monstrously large (>60%) detections
                                 if aspect_ratio > 2.8 or area_ratio < 0.005 or area_ratio > 0.60:
+                                    frame_rejected += 1
                                     continue
                                     
                             # Since realistic webcams max out at ~88% confidence for real phones,
@@ -117,6 +132,8 @@ class ObjectDetector:
                             
                         detected = True
                         detected_labels.append(label)
+                        frame_validated += 1
+                        self.metrics['confidences'].append(conf)
                         
                         # Always draw bounding boxes on forbidden objects
                         x1, y1, x2, y2 = box.xyxy[0]
@@ -143,6 +160,14 @@ class ObjectDetector:
                 self.object_alarm_end_time = datetime.now() + timedelta(seconds=3)
                 self.last_detected_label = combined_label
             
+            # ── Update real metrics ──────────────────────────────────
+            self.metrics['inference_frames'] += 1
+            self.metrics['raw_detections'] += frame_raw
+            self.metrics['validated_detections'] += frame_validated
+            self.metrics['rejected_detections'] += frame_rejected
+            if frame_raw == 0:
+                self.metrics['no_detection_frames'] += 1
+
             self.last_detection_time = current_time
             self.last_detected = detected
             self.last_person_detected = person_detected
