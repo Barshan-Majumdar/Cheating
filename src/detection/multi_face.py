@@ -8,18 +8,24 @@ class MultiFaceDetector:
         self.detector = MTCNN(
             keep_all=True,
             post_process=False,
-            min_face_size=40,
-            thresholds=[0.6, 0.7, 0.7],
+            min_face_size=80,
+            thresholds=[0.7, 0.8, 0.8],
             device=self.device
         )
         self.threshold = config['detection']['multi_face']['alert_threshold']
         self.consecutive_frames = 0
         self.alert_logger = None
+        self.frame_skip = 0
+        self.last_result = False
 
     def set_alert_logger(self, alert_logger):
         self.alert_logger = alert_logger
 
     def detect_multiple_faces(self, frame):
+        self.frame_skip += 1
+        if self.frame_skip % 3 != 0:
+            return self.last_result
+
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         # Prevent PyTorch from building massive computational graphs and OOM crashing
@@ -37,8 +43,12 @@ class MultiFaceDetector:
                         "MULTIPLE_FACES",
                         f"Detected {high_conf_faces} faces for {self.consecutive_frames} frames"
                     )
+                    self.last_result = True
                     return True
+            else:
+                self.consecutive_frames = 0
         else:
             self.consecutive_frames = 0
             
+        self.last_result = False
         return False

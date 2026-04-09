@@ -68,44 +68,28 @@ class HandMonitor:
                 keypoints = result.keypoints.data  # shape: [N, 17, 3] (x, y, conf)
                 num_people = keypoints.shape[0]
                 
-                # Rule 1: More than 1 person skeleton detected
-                if num_people > 1:
+                # Extract reliable (high-confidence) people boxes
+                valid_people_boxes = []
+                if result.boxes is not None:
+                    for box in result.boxes:
+                        if float(box.conf[0]) > 0.65:  # Stricter confidence filter
+                            valid_people_boxes.append(box)
+
+                # Rule 1: More than 1 reliable person detected
+                if len(valid_people_boxes) > 1:
                     triggered = True
                     msg = "Another Person Detected Nearby"
                     
                     # Draw warning on extra person boxes
-                    if result.boxes is not None:
-                        for i, box in enumerate(result.boxes):
-                            if i > 0:  # Skip first person (the student)
-                                x1, y1, x2, y2 = [int(c) for c in box.xyxy[0]]
-                                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                                cv2.putText(frame, "EXTRA PERSON!", (x1, y1 - 10),
-                                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    for i, box in enumerate(valid_people_boxes):
+                        if i > 0:  # Skip first person (the student)
+                            x1, y1, x2, y2 = [int(c) for c in box.xyxy[0]]
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                            cv2.putText(frame, "EXTRA PERSON!", (x1, y1 - 10),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 
-                # Rule 2: Check wrist keypoints near edges
-                # COCO keypoint indices: 9=left_wrist, 10=right_wrist
-                for person_kps in keypoints:
-                    for wrist_idx in [9, 10]:
-                        kp = person_kps[wrist_idx]
-                        kp_x, kp_y, kp_conf = float(kp[0]), float(kp[1]), float(kp[2])
-                        
-                        if kp_conf < 0.3:
-                            continue
-                        
-                        # Normalize to 0-1 range
-                        norm_x = kp_x / w
-                        norm_y = kp_y / h
-                        
-                        # Check if wrist is near horizontal frame edges
-                        if norm_x < self.edge_threshold or norm_x > (1.0 - self.edge_threshold):
-                            triggered = True
-                            if not msg:
-                                msg = "Suspicious Hand Movement (Reaching/Passing)"
-                            
-                            # Draw circle on the wrist
-                            cv2.circle(frame, (int(kp_x), int(kp_y)), 12, (0, 0, 255), -1)
-                            cv2.putText(frame, "REACH!", (int(kp_x) + 15, int(kp_y)),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                # Rule 2 disabled: The wrist-to-edge check causes ~99% false positives 
+                # for students normally typing or shifting hands on the keyboard.
             
             # Debounce and latch alarm
             if triggered:

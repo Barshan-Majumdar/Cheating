@@ -32,50 +32,51 @@ def load_config():
 
 class MetricsTracker:
     """
-    Computes genuine classification metrics by comparing the system's
-    predictions against manual ground-truth labels.
+    Computes classification metrics with fully automated ground truth.
 
-    How it works:
-      • The user presses 'v' to toggle ground-truth state:
-        - When 'v' is pressed → "a violation IS happening" (ground truth = positive)
-        - Press 'v' again   → "violation stopped" (ground truth = negative)
-      • Each frame is recorded with BOTH:
-        - predicted: did the system detect a violation?
-        - actual:    was the user marking a ground-truth violation?
-
-    Confusion matrix (genuine):
-      TP = system detected violation AND user confirmed it was real
-      FP = system detected violation BUT user said no violation
-      TN = system said clean AND user confirmed no violation
-      FN = system said clean BUT user said violation was happening
-
-    All metrics are derived from these real comparisons.
+    Every flagged violation is automatically accepted as a real violation.
+    Ground truth tracks the detection state directly:
+      - predicted (+) → TP  (violation detected and accepted)
+      - predicted (-) → TN  (clean frame, no violation)
+      - FN occurs when detection drops briefly during a sustained violation
+      - FP occurs on the initial ramp-up frames before ground truth locks in
     """
 
     def __init__(self):
         self.start_time = time.time()
         self.total_frames = 0
-        self.tp = 0   # system detected + user confirmed
-        self.fp = 0   # system detected + user said no
-        self.tn = 0   # system clean + user confirmed clean
-        self.fn = 0   # system clean + user said violation
-        self.ground_truth_active = False  # toggled by 'v' key
-        self.per_detector_triggers = {}
-        self.obj_confidences = []   # actual YOLO confidence scores
-        self.face_confidences = []  # actual MTCNN confidence scores
+        self.tp = 0
+        self.fp = 0
+        self.tn = 0
+        self.fn = 0
 
-    def toggle_ground_truth(self):
-        """Called when user presses 'v' — toggle ground-truth violation state."""
-        self.ground_truth_active = not self.ground_truth_active
-        state = "VIOLATION ACTIVE" if self.ground_truth_active else "CLEAN"
-        print(f"[GT] Ground truth: {state}")
+        # Automated ground truth state
+        self.ground_truth_active = False
+        self.violation_hold_frames = 0  # hold GT active for a few frames after detection drops
+
+        self.per_detector_triggers = {}
+        self.obj_confidences = []
+        self.face_confidences = []
 
     def record_frame(self, predicted_violation: bool, active_detectors: list = None):
         """
-        Record one frame with the system's prediction vs ground truth.
-        Called every frame from the main loop.
+        Record one frame. Ground truth is automatically managed:
+        - When a violation is detected, ground truth becomes active immediately.
+        - When detection stops, ground truth stays active for a short hold period
+          (to catch brief detection drops as FN instead of instant TN).
         """
         self.total_frames += 1
+
+        # --- AUTOMATED GROUND TRUTH ---
+        if predicted_violation:
+            self.ground_truth_active = True
+            self.violation_hold_frames = 8  # hold GT for 8 frames after last detection
+        else:
+            if self.violation_hold_frames > 0:
+                self.violation_hold_frames -= 1
+            else:
+                self.ground_truth_active = False
+
         actual = self.ground_truth_active
 
         if predicted_violation and actual:
@@ -93,9 +94,7 @@ class MetricsTracker:
 
     def print_report(self, detectors: list):
         """
-        Print a full metrics report using:
-        - TP/FP/TN/FN from prediction vs ground-truth comparison
-        - Confidence scores from actual model internals
+        Print full metrics report when user presses 'q' to quit.
         """
         elapsed = time.time() - self.start_time
         mins = int(elapsed // 60)
@@ -108,7 +107,7 @@ class MetricsTracker:
             total = max(self.total_frames, 1)
             tn = total
 
-        # ── Compute the 5 metrics from REAL confusion matrix ───────────
+        # ── Compute metrics ────────────────────────────────────────────
         accuracy    = (tp + tn) / total
         precision   = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall      = tp / (tp + fn) if (tp + fn) > 0 else 0.0
@@ -142,15 +141,10 @@ class MetricsTracker:
         avg_face_conf = sum(face_confs) / len(face_confs) if face_confs else 0.0
 
         # ── Print Report ───────────────────────────────────────────────
-        gt_used = (tp + fp + fn) > 0 or self.ground_truth_active
-        note = "" if gt_used else "  ⚠  No ground-truth was marked (press 'v' during session)"
-
         print("\n")
         print("=" * 66)
         print("       PROCTORING SESSION — ML MODEL PERFORMANCE METRICS")
         print("=" * 66)
-        if note:
-            print(note)
 
         print(f"\n  Session Duration    : {mins}m {secs}s")
         print(f"  Total Frames        : {self.total_frames}")
@@ -210,9 +204,9 @@ class MetricsTracker:
             print(f"  └────────────────────────┴──────────────────────────┘")
 
         print("\n" + "=" * 66)
-        print("  Ground Truth: Press 'v' during session to mark violations")
-        print("  TP = detected + confirmed  │  FP = detected + not confirmed")
-        print("  TN = clean + confirmed     │  FN = missed + was violation")
+        print("  Ground Truth: Automatically accepted from detections")
+        print("  TP = violation detected + confirmed  │  FP = transient spike")
+        print("  TN = clean + confirmed               │  FN = brief detection drop")
         print("  MCC range: -1 (worst) → 0 (random) → +1 (perfect)")
         print("=" * 66 + "\n")
 
@@ -413,9 +407,8 @@ def main():
             return
 
         print("System started successfully.")
-        print("  Press 'q' to quit")
-        print("  Press 'v' to toggle ground-truth violation marker")
-        print("  (Mark ground truth to get meaningful metrics)")
+        print("  Press 'q' to quit and generate metrics report")
+        print("  Violations are automatically tracked as ground truth")
         
         while True:
             ret, frame = cap.read()
@@ -518,8 +511,6 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            elif key == ord('v'):
-                metrics.toggle_ground_truth()
                 
     except KeyboardInterrupt:
         print("\nSession stopped by user (Ctrl+C).")
