@@ -107,10 +107,15 @@ def handle_violation(violation_type, frame, results, alert_system, violation_cap
     # Capture and log violation
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     violation_image = violation_capturer.capture_violation(frame, violation_type, timestamp)
+    
+    metadata = {'duration': 'Detected', 'frame': results}
+    if violation_image:
+        metadata['image_path'] = violation_image['image_path']
+        
     violation_logger.log_violation(
         violation_type,
         timestamp,
-        {'duration': 'Detected', 'frame': results}
+        metadata
     )
 
 def main():
